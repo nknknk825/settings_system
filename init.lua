@@ -7,7 +7,6 @@ vim.opt.tabstop = 4
 vim.opt.shiftwidth = 4
 vim.opt.expandtab = true
 vim.opt.smartindent = true
-
 vim.g.mapleader = " "
 
 -- ===============================
@@ -17,12 +16,10 @@ function get_project_root()
     local cwd = vim.fn.getcwd()
     local current_file = vim.fn.expand('%:p')
 
-    -- Если файл не открыт — возвращаем текущую папку
     if current_file == '' then
         return cwd
     end
 
-    -- Если текущая директория уже содержит .git или Makefile — это корень
     local markers = { ".git", "Makefile", "CMakeLists.txt", "compile_commands.json" }
     for _, name in ipairs(markers) do
         if vim.fn.filereadable(cwd .. "/" .. name) == 1 or vim.fn.isdirectory(cwd .. "/" .. name) == 1 then
@@ -30,13 +27,11 @@ function get_project_root()
         end
     end
 
-    -- Пробуем найти git-корень
     local git_root = vim.fn.systemlist('git -C ' .. vim.fn.shellescape(cwd) .. ' rev-parse --show-toplevel 2>/dev/null')
     if vim.v.shell_error == 0 and git_root[1] and git_root[1] ~= '' then
         return git_root[1]
     end
 
-    -- Альтернатива: ищем любой файл-маркер вверх по дереву
     for _, name in ipairs(markers) do
         local path = vim.fn.findfile(name, vim.fn.expand('%:p:h') .. ';')
         if path ~= '' then
@@ -44,12 +39,91 @@ function get_project_root()
         end
     end
 
-    -- Иначе остаёмся в текущей папке
     return cwd
 end
 
 -- ===============================
--- ПЛАГИН-МЕНЕДЖЕР lazy.nvim
+-- 🧩 УМНАЯ СИСТЕМА СЕССИЙ S1–S5
+-- ===============================
+local session = {}
+local session_dir = vim.fn.stdpath("data") .. "/sessions"
+vim.fn.mkdir(session_dir, "p")
+
+local function project_name()
+    return vim.fn.getcwd():gsub("[:/\\]", "_")
+end
+
+local function session_path(slot)
+    return string.format("%s/%s_s%d.vim", session_dir, project_name(), slot)
+end
+
+function session.save(slot)
+    if slot < 1 or slot > 5 then
+        vim.notify("❌ Неверный слот: " .. tostring(slot), vim.log.levels.ERROR)
+        return
+    end
+    local path = session_path(slot)
+    vim.cmd("mks! " .. vim.fn.fnameescape(path))
+    vim.notify("💾 Сессия сохранена: s" .. slot, vim.log.levels.INFO)
+end
+
+function session.load(slot)
+    if slot < 1 or slot > 5 then
+        vim.notify("❌ Неверный слот: " .. tostring(slot), vim.log.levels.ERROR)
+        return
+    end
+    local path = session_path(slot)
+    if vim.fn.filereadable(path) == 1 then
+        vim.cmd("source " .. vim.fn.fnameescape(path))
+        vim.notify("📂 Сессия загружена: s" .. slot, vim.log.levels.INFO)
+    else
+        vim.notify("⚠️ Сессия s" .. slot .. " не найдена", vim.log.levels.WARN)
+    end
+end
+
+function session.delete(slot)
+    if slot < 1 or slot > 5 then
+        vim.notify("❌ Неверный слот: " .. tostring(slot), vim.log.levels.ERROR)
+        return
+    end
+    local path = session_path(slot)
+    if vim.fn.filereadable(path) == 1 then
+        os.remove(path)
+        vim.notify("🗑️ Сессия удалена: s" .. slot, vim.log.levels.INFO)
+    else
+        vim.notify("⚠️ Сессия s" .. slot .. " не существует", vim.log.levels.WARN)
+    end
+end
+
+-- 🔑 Горячие клавиши для сессий
+vim.keymap.set("n", "<leader>ss", function()
+    local slot = tonumber(vim.fn.input("💾 Сохранить в слот (1–4): "))
+    if slot and slot >= 1 and slot <= 4 then session.save(slot)
+    else vim.notify("❌ Введи число от 1 до 4", vim.log.levels.ERROR) end
+end, { desc = "💾 Сохранить сессию" })
+
+vim.keymap.set("n", "<leader>sl", function()
+    local slot = tonumber(vim.fn.input("📂 Загрузить слот (1–5): "))
+    if slot and slot >= 1 and slot <= 5 then session.load(slot)
+    else vim.notify("❌ Введи число от 1 до 5", vim.log.levels.ERROR) end
+end, { desc = "📂 Загрузить сессию" })
+
+vim.keymap.set("n", "<leader>sd", function()
+    local slot = tonumber(vim.fn.input("🗑 Удалить слот (1–4): "))
+    if slot and slot >= 1 and slot <= 4 then session.delete(slot)
+    else vim.notify("❌ Введи число от 1 до 4", vim.log.levels.ERROR) end
+end, { desc = "🗑 Удалить сессию" })
+
+-- Автосохранение в S5 при выходе
+vim.api.nvim_create_autocmd("VimLeavePre", {
+    callback = function() pcall(session.save, 5) end,
+})
+
+-- Доступ глобально
+_G.session = session
+
+-- ===============================
+-- ИНИЦИАЛИЗАЦИЯ LAZY.NVIM И ПЛАГИНОВ
 -- ===============================
 require("lazy").setup({
     {
@@ -63,19 +137,15 @@ require("lazy").setup({
             })
         end,
     },
-
     {
         "neovim/nvim-lspconfig",
         config = function()
             local capabilities = vim.lsp.protocol.make_client_capabilities()
 
-            -- Автозапуск clangd для C/C++
             vim.api.nvim_create_autocmd("FileType", {
                 pattern = { "c", "cpp" },
                 callback = function()
                     local root = get_project_root()
-
-                    -- Проверяем, не запущен ли уже clangd
                     local existing = vim.lsp.get_clients({ name = "clangd" })
                     if #existing == 0 then
                         vim.lsp.start({
@@ -90,107 +160,113 @@ require("lazy").setup({
             })
         end,
     },
+    {
+        "hrsh7th/nvim-cmp",
+        dependencies = {
+            "hrsh7th/cmp-buffer",
+            "hrsh7th/cmp-path",
+            "hrsh7th/cmp-nvim-lsp",
+            "L3MON4D3/LuaSnip",
+        },
+        config = function()
+            local cmp = require("cmp")
+            cmp.setup({
+                snippet = {
+                    expand = function(args)
+                        require("luasnip").lsp_expand(args.body)
+                    end,
+                },
+                mapping = cmp.mapping.preset.insert({
+                    ["<C-b>"] = cmp.mapping.scroll_docs(-4),
+                    ["<C-f>"] = cmp.mapping.scroll_docs(4),
+                    ["<C-Space>"] = cmp.mapping.complete(),
+                    ["<C-e>"] = cmp.mapping.abort(),
+                    ["<CR>"] = cmp.mapping.confirm({ select = true }),
+                    ["<Tab>"] = cmp.mapping.select_next_item(),
+                    ["<S-Tab>"] = cmp.mapping.select_prev_item(),
+                }),
+                sources = cmp.config.sources({
+                    { name = "nvim_lsp" },
+                    { name = "luasnip" },
+                }, {
+                    { name = "buffer" },
+                    { name = "path" },
+                }),
+            })
+        end,
+    },
+    {
+        "L3MON4D3/LuaSnip",
+        version = "v2.*",
+        build = "make install_jsregexp",
+    },
 })
 
 -- ===============================
--- УСТАНАВЛИВАЕМ ГЛОБАЛЬНЫЙ КОРЕНЬ
+-- НАСТРОЙКА ГЛОБАЛЬНОГО КОРНЯ
 -- ===============================
 vim.g.project_root = get_project_root()
 vim.cmd("cd " .. vim.fn.fnameescape(vim.g.project_root))
 
 -- ===============================
--- КЛАВИШИ ДЛЯ ВЫХОДА ИЗ РЕЖИМОВ
+-- ВЫХОД ИЗ РЕЖИМОВ
 -- ===============================
 local opts = { noremap = true, silent = true }
 for _, combo in ipairs({ "jk", "kj" }) do
-    vim.keymap.set('i', combo, '<Esc>', opts)
-    vim.keymap.set('v', combo, '<Esc>', opts)
-    vim.keymap.set('t', combo, '<C-d>', opts)
+    vim.keymap.set("i", combo, "<Esc>", opts)
+    vim.keymap.set("v", combo, "<Esc>", opts)
+    vim.keymap.set("t", combo, "<C-d>", opts)
 end
 
+vim.keymap.set("n", "<leader>c", ":nohlsearch<CR>")
+vim.keymap.set("n", "<leader>s", ":w<CR>")
+vim.keymap.set("n", "<leader>x", ":x<CR>")
+vim.keymap.set("n", "<leader>q", ":q!<CR>")
+
+vim.keymap.set("n", "<C-PageDown>", "gt")
+vim.keymap.set("n", "<C-PageUp>", "gT")
+vim.keymap.set("n", "<C-t>", ":tabnew<CR>")
+
 -- ===============================
--- ТЕРМИНАЛ В КОРНЕ ПРОЕКТА
+-- ТЕРМИНАЛ SPLIT (внизу)
 -- ===============================
-vim.keymap.set('n', '<leader>tm', function()
+vim.keymap.set("n", "<leader>tm", function()
     local root_dir = get_project_root()
+    vim.cmd("belowright split term://" .. vim.o.shell)
+    vim.cmd("resize 12")
+    vim.cmd("startinsert")
 
-    -- открываем терминал внизу
-    vim.cmd('belowright split term://' .. vim.o.shell)
-    vim.cmd('resize 12')
-
-    -- сразу переходим в insert-режим
-    vim.cmd('startinsert')
-
-    -- переходим в корень проекта
     vim.defer_fn(function()
         vim.cmd('call chansend(b:terminal_job_id, "cd ' .. vim.fn.shellescape(root_dir) .. ' && clear\\n")')
     end, 100)
 
-    -- автозакрытие терминала после выхода (Ctrl+D или exit)
     vim.cmd([[
         autocmd TermClose * if &buftype == 'terminal' | exe 'close' | endif
     ]])
 end, opts)
 
-
-
 -- ===============================
--- АВТОМАТИЧЕСКИЙ INSERT В ТЕРМИНАЛЕ
+-- POPUP-ТЕРМИНАЛ + MAKE (80% экрана)
 -- ===============================
-vim.api.nvim_create_autocmd("TermOpen", {
-    pattern = "*",
-    callback = function()
-        vim.cmd("startinsert")
-    end,
-})
-
--- Автоматически включаем режим вставки при входе в терминал
-vim.api.nvim_create_autocmd("TermEnter", {
-  callback = function()
-    vim.cmd("startinsert")
-  end
-})
-
--- Автоматически выходим из вставки при уходе из терминала
-vim.api.nvim_create_autocmd("TermLeave", {
-  callback = function()
-    vim.cmd("stopinsert")
-  end
-})
--- При клике мышью в окно терминала — сразу вставка
-vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter", "CursorMoved", "FocusGained" }, {
-  callback = function()
-    local buftype = vim.bo.buftype
-    if buftype == "terminal" then
-      vim.cmd("startinsert")
-    end
-  end,
-})
-vim.keymap.set('n', '<leader>n', function()
+vim.keymap.set("n", "<leader>r", function()
     local root_dir = get_project_root()
-
-    -- Размеры popup-а
     local width = math.floor(vim.o.columns * 0.8)
     local height = math.floor(vim.o.lines * 0.7)
     local row = math.floor((vim.o.lines - height) / 2)
     local col = math.floor((vim.o.columns - width) / 2)
 
-    -- Создаем скрытый буфер для терминала
     local buf = vim.api.nvim_create_buf(false, true)
-
-    -- Создаём всплывающее окно
     local win = vim.api.nvim_open_win(buf, true, {
-        relative = 'editor',
+        relative = "editor",
         width = width,
         height = height,
         row = row,
         col = col,
-        style = 'minimal',
-        border = 'rounded',
+        style = "minimal",
+        border = "rounded",
     })
 
-    -- Запускаем терминал в этом окне
-    vim.fn.termopen('bash', {
+    vim.fn.termopen("bash", {
         cwd = root_dir,
         on_exit = function(_, code, _)
             if code == 0 then
@@ -199,25 +275,60 @@ vim.keymap.set('n', '<leader>n', function()
         end,
     })
 
-    -- Переходим в insert (режим терминала)
-    vim.cmd('startinsert')
+    vim.cmd("startinsert")
 
-    -- Ждём немного и запускаем make
     vim.defer_fn(function()
-        local cmd = 'cd ' .. vim.fn.shellescape(root_dir) .. ' && clear && make\n'
+        local cmd = "cd " .. vim.fn.shellescape(root_dir) .. " && clear && make\n"
         vim.fn.chansend(vim.b.terminal_job_id, cmd)
     end, 200)
 
-    -- Когда пользователь нажимает Enter — закрываем окно
     vim.keymap.set('t', 'jk', function()
-        vim.api.nvim_win_close(win, true)
-        end, { buffer = buf, noremap = true, silent = true })
+        vim.api.nvim_win_close(win, true) 
+    end, { buffer = buf, noremap = true, silent = true }) 
 
-    vim.keymap.set('t', 'kj', function()
-        vim.api.nvim_win_close(win, true)
-        end, { buffer = buf, noremap = true, silent = true })
+    vim.keymap.set('t', 'kj', function() 
+        vim.api.nvim_win_close(win, true) 
+    end, { buffer = buf, noremap = true, silent = true })
+
 end, { noremap = true, silent = true, desc = "Run make in popup terminal" })
 
+-- ===============================
+-- АВТОМАТИЧЕСКИЙ INSERT В ТЕРМИНАЛЕ
+-- ===============================
+vim.api.nvim_create_autocmd("TermOpen", { pattern = "*", callback = function() vim.cmd("startinsert") end })
+vim.api.nvim_create_autocmd("TermEnter", { callback = function() vim.cmd("startinsert") end })
+vim.api.nvim_create_autocmd("TermLeave", { callback = function() vim.cmd("stopinsert") end })
+vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter", "CursorMoved", "FocusGained" }, {
+    callback = function()
+        if vim.bo.buftype == "terminal" then vim.cmd("startinsert") end
+    end,
+})
+
+-- ===============================
+-- ДИНАМИЧЕСКОЕ ОБНОВЛЕНИЕ КОРНЯ
+-- ===============================
+local uv = vim.loop
+local function update_project_root(new_root)
+    if not new_root or new_root == "" then return end
+    if vim.fn.isdirectory(new_root) == 1 and new_root ~= vim.g.project_root then
+        vim.g.project_root = new_root
+        pcall(function() vim.cmd("cd " .. vim.fn.fnameescape(new_root)) end)
+    end
+end
+
+vim.api.nvim_create_autocmd("BufEnter", {
+    pattern = "*",
+    callback = function()
+        local ok, new_root = pcall(get_project_root)
+        if ok then update_project_root(new_root) end
+    end,
+})
+
+vim.api.nvim_create_autocmd("DirChanged", {
+    callback = function()
+        update_project_root(uv.cwd())
+    end,
+})
 
 -- ===============================
 -- ДИАГНОСТИКА
@@ -236,19 +347,53 @@ vim.diagnostic.config({
 vim.cmd.colorscheme("retrobox")
 
 -- ===============================
--- ОБНОВЛЕНИЕ КОРНЯ ПРИ СМЕНЕ ФАЙЛА
+-- 🧩 ФИКС АВТОДОПОЛНЕНИЯ В TAB-ВКЛАДКАХ
 -- ===============================
-vim.api.nvim_create_autocmd("BufEnter", {
-    pattern = "*",
+vim.api.nvim_create_autocmd("BufReadPost", {
+    pattern = { "*.cpp", "*.c", "*.hpp", "*.h" },
     callback = function()
-        local new_root = get_project_root()
-        -- Проверяем, что это реальный путь
-        if new_root ~= vim.g.project_root and vim.fn.isdirectory(new_root) == 1 then
-            vim.g.project_root = new_root
-            pcall(function()
-                vim.cmd("cd " .. vim.fn.fnameescape(new_root))
-            end)
+        local clients = vim.lsp.get_clients({ bufnr = 0 })
+        if #clients == 0 then
+            local root = get_project_root()
+            vim.lsp.start({
+                name = "clangd",
+                cmd = { "clangd" },
+                root_dir = root,
+                filetypes = { "c", "cpp" },
+            })
         end
     end,
 })
+
+vim.api.nvim_create_autocmd("LspAttach", {
+    callback = function(args)
+        local cmp = require('cmp')
+        cmp.setup.buffer({
+            sources = {
+                { name = 'nvim_lsp' },
+                { name = 'buffer' },
+                { name = 'path' },
+                { name = 'luasnip' },
+            },
+        })
+    end,
+})
+
+local cmp = require('cmp')
+cmp.setup({
+    enabled = function()
+        local buftype = vim.api.nvim_buf_get_option(0, "buftype")
+        return not (buftype == "prompt" or buftype == "terminal")
+    end,
+})
+
+vim.keymap.set("n", "<leader>rl", function()
+    for name, _ in pairs(package.loaded) do
+        if name:match("^user") or name:match("^config") or name:match("^plugins") then
+            package.loaded[name] = nil
+        end
+    end
+    dofile(vim.env.MYVIMRC)
+    vim.notify("✅ Config reloaded successfully!", vim.log.levels.INFO)
+end, { desc = "Reload Neovim config" })
 
