@@ -3,11 +3,20 @@
 -- ===============================
 local cmp = require('cmp')
 
+local function set_cmp_colors()
+  vim.api.nvim_set_hl(0, "CmpItemAbbr", { fg = "#d19a66" })
+  vim.api.nvim_set_hl(0, "CmpItemAbbrMatch", { fg = "#e5c07b", bold = true })
+  vim.api.nvim_set_hl(0, "CmpItemKind", { fg = "#c678dd" })
+  vim.api.nvim_set_hl(0, "CmpItemMenu", { fg = "#56b6c2" })
+end
+
+
 cmp.setup({
     enabled = function()
         local buftype = vim.api.nvim_buf_get_option(0, "buftype")
         return not (buftype == "prompt" or buftype == "terminal")
     end,
+    set_cmp_colors(),
 })
 
 cmp.setup({
@@ -32,14 +41,19 @@ cmp.setup({
         { name = "buffer" },
         { name = "path" },
     }),
+    set_cmp_colors(),
 })
 
 vim.keymap.set("n", "<leader>rl", function()
+    -- Очищаем только модули вашей конфигурации
     for name, _ in pairs(package.loaded) do
-        if name:match("^user") or name:match("^config") or name:match("^plugins") then
+        if name:match("^core%.") or name == "plugins" then
             package.loaded[name] = nil
         end
     end
-    dofile(vim.env.MYVIMRC)
+    
+    -- Перезагружаем init.lua
+    vim.cmd('source $MYVIMRC')
+    
     vim.notify("✅ Конфигурация перезагружена успешно!", vim.log.levels.INFO)
 end, { desc = "Reload Neovim config" })

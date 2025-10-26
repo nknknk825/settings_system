@@ -19,5 +19,5 @@ return {
     { "loctvl842/monokai-pro.nvim" },
     { "nvim-treesitter/nvim-treesitter", run = ":TSUpdate" },
     -- для asm подсветки
-    { "rhysd/asm.vim" }, 
+--    { "rhysd/asm.vim" }, 
 }
